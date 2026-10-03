@@ -1,29 +1,33 @@
-﻿name: ASP.NET Core CI-CD
+﻿name: ASP.NET Core API CI-CD to IIS
 
 on:
   push:
     branches:
       - main
 
-  workflow_dispatch:
-
 jobs:
   build-and-deploy:
 
-    runs-on: [self-hosted, Windows, X64, iis]
+    runs-on:
+      - self-hosted
+      - Windows
+      - X64
+      - iis
 
     steps:
 
-      # 1. GitHub se code lena
+      # 1. Checkout code
       - name: Checkout Code
         uses: actions/checkout@v4
 
-      # 2. Server par installed .NET check karna
+
+      # 2. Check .NET
       - name: Check .NET
         shell: powershell
         run: |
           dotnet --info
           dotnet --version
+
 
       # 3. Restore
       - name: Restore
@@ -31,58 +35,107 @@ jobs:
         run: |
           dotnet restore
 
+
       # 4. Build
       - name: Build
         shell: powershell
         run: |
           dotnet build --configuration Release --no-restore
 
+
       # 5. Publish
       - name: Publish
         shell: powershell
         run: |
-          dotnet publish --configuration Release `
+          dotnet publish `
+            --configuration Release `
             --output "${{ github.workspace }}\publish" `
             --no-build
 
-      # 6. Stop IIS website
+
+      # 6. Check publish folder
+      - name: Check Publish Folder
+        shell: powershell
+        run: |
+          Write-Host "Publish folder:"
+          Get-ChildItem "${{ github.workspace }}\publish"
+
+
+      # 7. Stop IIS Website
       - name: Stop IIS Website
         shell: powershell
         run: |
           Import-Module WebAdministration
-          Stop-Website -Name "MyWebApi"
 
-      # 7. Deploy published files to IIS
+          if (Test-Path "IIS:\Sites\MyWebApi") {
+              Stop-Website -Name "MyWebApi"
+              Write-Host "MyWebApi stopped."
+          }
+          else {
+              Write-Host "MyWebApi website does not exist."
+          }
+
+
+      # 8. Create IIS deployment folder
+      - name: Create Deployment Folder
+        shell: powershell
+        run: |
+          $destination = "C:\inetpub\MyWebApi"
+
+          if (!(Test-Path $destination)) {
+              New-Item -ItemType Directory -Path $destination -Force
+          }
+
+          Write-Host "Deployment folder ready: $destination"
+
+
+      # 9. Remove old published files
+      - name: Remove Old Files
+        shell: powershell
+        run: |
+          $destination = "C:\inetpub\MyWebApi"
+
+          Get-ChildItem $destination -Force |
+              Remove-Item -Recurse -Force
+
+          Write-Host "Old files removed."
+
+
+      # 10. Copy new published files
       - name: Deploy to IIS
         shell: powershell
         run: |
           $source = "${{ github.workspace }}\publish"
           $destination = "C:\inetpub\MyWebApi"
 
-          Write-Host "Source: $source"
-          Write-Host "Destination: $destination"
+          Copy-Item `
+            -Path "$source\*" `
+            -Destination $destination `
+            -Recurse `
+            -Force
 
-          if (!(Test-Path $destination)) {
-              New-Item -ItemType Directory -Path $destination -Force
-          }
+          Write-Host "New files copied to IIS."
 
-          Get-ChildItem -Path $destination -Force |
-              Remove-Item -Recurse -Force
 
-          Copy-Item -Path "$source\*" `
-              -Destination $destination `
-              -Recurse `
-              -Force
-
-      # 8. Start IIS website
+      # 11. Start IIS Website
       - name: Start IIS Website
         shell: powershell
         run: |
           Import-Module WebAdministration
-          Start-Website -Name "MyWebApi"
 
-      # 9. Deployment completed
-      - name: Deployment Complete
+          if (Test-Path "IIS:\Sites\MyWebApi") {
+              Start-Website -Name "MyWebApi"
+              Write-Host "MyWebApi started successfully."
+          }
+          else {
+              Write-Error "IIS website 'MyWebApi' was not found."
+          }
+
+
+      # 12. Deployment completed
+      - name: Deployment Completed
         shell: powershell
         run: |
-          Write-Host "CI/CD deployment completed successfully!"
+          Write-Host "======================================"
+          Write-Host " CI/CD Deployment Completed Successfully"
+          Write-Host "======================================"
