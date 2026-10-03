@@ -1,4 +1,4 @@
-﻿name: ASP.NET Core API CI-CD to IIS
+﻿name: ASP.NET Core API CI-CD
 
 on:
   push:
@@ -18,7 +18,7 @@ jobs:
 
     steps:
 
-      # 1. Checkout source code
+      # 1. Checkout code
       - name: Checkout Code
         uses: actions/checkout@v4
 
@@ -27,151 +27,147 @@ jobs:
       - name: Check .NET
         shell: powershell
         run: |
-          $ErrorActionPreference = "Stop"
-
-          Write-Host "Checking installed .NET..."
+          Write-Host "Checking .NET..."
           dotnet --version
           dotnet --info
 
 
-      # 3. Restore NuGet packages
+      # 3. Restore
       - name: Restore
         shell: powershell
         run: |
-          $ErrorActionPreference = "Stop"
-
           Write-Host "Restoring project..."
           dotnet restore
 
 
-      # 4. Build project
+      # 4. Build
       - name: Build
         shell: powershell
         run: |
-          $ErrorActionPreference = "Stop"
-
           Write-Host "Building project..."
           dotnet build --configuration Release --no-restore
 
 
-      # 5. Publish project
+      # 5. Publish
       - name: Publish
         shell: powershell
         run: |
-          $ErrorActionPreference = "Stop"
-
           $publishPath = "${{ github.workspace }}\publish"
 
           Write-Host "Publishing project..."
-          Write-Host "Publish Path: $publishPath"
+          Write-Host "Publish path: $publishPath"
 
           if (Test-Path $publishPath) {
               Remove-Item $publishPath -Recurse -Force
           }
 
-          dotnet publish `
-            --configuration Release `
-            --output $publishPath `
-            --no-build
+          dotnet publish --configuration Release --output $publishPath --no-build
 
           Write-Host "Publish completed."
 
 
-      # 6. Verify published files
-      - name: Verify Publish
+      # 6. Check publish folder
+      - name: Check Publish Folder
         shell: powershell
         run: |
-          $ErrorActionPreference = "Stop"
-
           $publishPath = "${{ github.workspace }}\publish"
 
+          Write-Host "Checking publish folder..."
+
           if (!(Test-Path $publishPath)) {
-              throw "Publish folder was not created."
+              throw "Publish folder does not exist."
           }
 
-          Write-Host "Published files:"
-          Get-ChildItem $publishPath -Recurse
+          Get-ChildItem $publishPath
+
+          Write-Host "Publish folder verified."
 
 
-      # 7. Stop IIS Website
+      # 7. Stop IIS website
       - name: Stop IIS Website
         shell: powershell
         run: |
-          $ErrorActionPreference = "Stop"
-
           Import-Module WebAdministration
 
           if (Test-Path "IIS:\Sites\MyWebApi") {
 
-              Write-Host "Stopping IIS website: MyWebApi"
+              Write-Host "Stopping MyWebApi..."
 
               Stop-Website -Name "MyWebApi"
 
-              Start-Sleep -Seconds 3
+              Start-Sleep -Seconds 2
 
-              Write-Host "IIS website stopped."
+              Write-Host "MyWebApi stopped."
           }
           else {
-              Write-Host "IIS website MyWebApi does not exist."
+              Write-Host "MyWebApi website does not exist."
+              Write-Host "Skipping stop operation."
           }
 
 
-      # 8. Prepare IIS deployment folder
-      - name: Prepare IIS Folder
+      # 8. Create IIS deployment folder
+      - name: Create Deployment Folder
         shell: powershell
         run: |
-          $ErrorActionPreference = "Stop"
-
           $destination = "C:\inetpub\MyWebApi"
 
           Write-Host "Deployment folder: $destination"
 
           if (!(Test-Path $destination)) {
 
-              Write-Host "Creating deployment folder..."
-
               New-Item `
                 -ItemType Directory `
                 -Path $destination `
                 -Force | Out-Null
-          }
 
-          Write-Host "Deployment folder ready."
+              Write-Host "Deployment folder created."
+          }
+          else {
+              Write-Host "Deployment folder already exists."
+          }
 
 
       # 9. Remove old files
       - name: Remove Old Files
         shell: powershell
         run: |
-          $ErrorActionPreference = "Stop"
-
           $destination = "C:\inetpub\MyWebApi"
 
-          Write-Host "Removing old IIS files..."
+          Write-Host "Removing old files..."
 
-          Get-ChildItem `
-            -Path $destination `
-            -Force `
-            -ErrorAction SilentlyContinue |
-            Remove-Item `
-              -Recurse `
-              -Force `
-              -ErrorAction Stop
+          if (Test-Path $destination) {
+
+              Get-ChildItem `
+                -Path $destination `
+                -Force |
+                Remove-Item `
+                  -Recurse `
+                  -Force
+          }
 
           Write-Host "Old files removed."
 
 
-      # 10. Copy new published files
+      # 10. Copy new files
       - name: Deploy to IIS
         shell: powershell
         run: |
-          $ErrorActionPreference = "Stop"
-
           $source = "${{ github.workspace }}\publish"
           $destination = "C:\inetpub\MyWebApi"
 
           Write-Host "Source: $source"
           Write-Host "Destination: $destination"
+
+          if (!(Test-Path $source)) {
+              throw "Publish folder not found."
+          }
+
+          if (!(Test-Path $destination)) {
+              New-Item `
+                -ItemType Directory `
+                -Path $destination `
+                -Force | Out-Null
+          }
 
           Copy-Item `
             -Path "$source\*" `
@@ -179,37 +175,31 @@ jobs:
             -Recurse `
             -Force
 
-          Write-Host "New files copied successfully."
+          Write-Host "New files copied to IIS."
 
 
-      # 11. Start IIS Website
+      # 11. Start IIS website
       - name: Start IIS Website
         shell: powershell
         run: |
-          $ErrorActionPreference = "Stop"
-
           Import-Module WebAdministration
 
           if (Test-Path "IIS:\Sites\MyWebApi") {
 
-              Write-Host "Starting IIS website: MyWebApi"
+              Write-Host "Starting MyWebApi..."
 
               Start-Website -Name "MyWebApi"
 
-              Start-Sleep -Seconds 3
+              Start-Sleep -Seconds 2
 
               $site = Get-Website -Name "MyWebApi"
 
-              Write-Host "IIS Site State: $($site.State)"
+              Write-Host "Website State: $($site.State)"
 
-              if ($site.State -ne "Started") {
-                  throw "IIS website MyWebApi failed to start."
-              }
-
-              Write-Host "IIS website started successfully."
           }
           else {
-              throw "IIS website MyWebApi was not found."
+              Write-Host "MyWebApi website does not exist."
+              Write-Host "Please check IIS website name."
           }
 
 
@@ -217,8 +207,6 @@ jobs:
       - name: Deployment Completed
         shell: powershell
         run: |
-          Write-Host ""
           Write-Host "========================================"
-          Write-Host " CI/CD DEPLOYMENT COMPLETED SUCCESSFULLY"
+          Write-Host " CI/CD DEPLOYMENT COMPLETED"
           Write-Host "========================================"
-          Write-Host ""
