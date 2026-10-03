@@ -5,6 +5,8 @@ on:
     branches:
       - main
 
+  workflow_dispatch:
+
 jobs:
   build-and-deploy:
 
@@ -20,46 +22,58 @@ jobs:
       - name: Checkout Code
         uses: actions/checkout@v4
 
-
-      # 2. Check .NET
+      # 2. Check installed .NET
       - name: Check .NET
         shell: powershell
         run: |
-          dotnet --info
+          Write-Host "Checking installed .NET..."
           dotnet --version
-
+          dotnet --info
 
       # 3. Restore
       - name: Restore
         shell: powershell
         run: |
+          Write-Host "Restoring project..."
           dotnet restore
-
 
       # 4. Build
       - name: Build
         shell: powershell
         run: |
+          Write-Host "Building project..."
           dotnet build --configuration Release --no-restore
-
 
       # 5. Publish
       - name: Publish
         shell: powershell
         run: |
+          $publishPath = "${{ github.workspace }}\publish"
+
+          if (Test-Path $publishPath) {
+              Remove-Item $publishPath -Recurse -Force
+          }
+
           dotnet publish `
             --configuration Release `
-            --output "${{ github.workspace }}\publish" `
+            --output $publishPath `
             --no-build
 
+          Write-Host "Publish completed."
 
-      # 6. Check publish folder
+      # 6. Check published files
       - name: Check Publish Folder
         shell: powershell
         run: |
-          Write-Host "Publish folder:"
-          Get-ChildItem "${{ github.workspace }}\publish"
+          $publishPath = "${{ github.workspace }}\publish"
 
+          if (!(Test-Path $publishPath)) {
+              Write-Error "Publish folder was not created."
+              exit 1
+          }
+
+          Write-Host "Published files:"
+          Get-ChildItem $publishPath -Recurse
 
       # 7. Stop IIS Website
       - name: Stop IIS Website
@@ -68,45 +82,40 @@ jobs:
           Import-Module WebAdministration
 
           if (Test-Path "IIS:\Sites\MyWebApi") {
+              Write-Host "Stopping MyWebApi..."
               Stop-Website -Name "MyWebApi"
               Write-Host "MyWebApi stopped."
           }
           else {
-              Write-Host "MyWebApi website does not exist."
+              Write-Error "IIS website 'MyWebApi' was not found."
+              exit 1
           }
 
-
-      # 8. Create IIS deployment folder
-      - name: Create Deployment Folder
-        shell: powershell
-        run: |
-          $destination = "C:\inetpub\MyWebApi"
-
-          if (!(Test-Path $destination)) {
-              New-Item -ItemType Directory -Path $destination -Force
-          }
-
-          Write-Host "Deployment folder ready: $destination"
-
-
-      # 9. Remove old published files
-      - name: Remove Old Files
-        shell: powershell
-        run: |
-          $destination = "C:\inetpub\MyWebApi"
-
-          Get-ChildItem $destination -Force |
-              Remove-Item -Recurse -Force
-
-          Write-Host "Old files removed."
-
-
-      # 10. Copy new published files
+      # 8. Deploy files to IIS
       - name: Deploy to IIS
         shell: powershell
         run: |
           $source = "${{ github.workspace }}\publish"
           $destination = "C:\inetpub\MyWebApi"
+
+          Write-Host "Source: $source"
+          Write-Host "Destination: $destination"
+
+          if (!(Test-Path $source)) {
+              Write-Error "Publish folder does not exist."
+              exit 1
+          }
+
+          if (!(Test-Path $destination)) {
+              New-Item -ItemType Directory -Path $destination -Force
+          }
+
+          Write-Host "Removing old files..."
+
+          Get-ChildItem -Path $destination -Force |
+              Remove-Item -Recurse -Force
+
+          Write-Host "Copying new files..."
 
           Copy-Item `
             -Path "$source\*" `
@@ -114,10 +123,9 @@ jobs:
             -Recurse `
             -Force
 
-          Write-Host "New files copied to IIS."
+          Write-Host "Files deployed successfully."
 
-
-      # 11. Start IIS Website
+      # 9. Start IIS Website
       - name: Start IIS Website
         shell: powershell
         run: |
@@ -129,10 +137,10 @@ jobs:
           }
           else {
               Write-Error "IIS website 'MyWebApi' was not found."
+              exit 1
           }
 
-
-      # 12. Deployment completed
+      # 10. Deployment completed
       - name: Deployment Completed
         shell: powershell
         run: |
